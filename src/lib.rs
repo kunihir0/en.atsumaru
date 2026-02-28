@@ -19,10 +19,10 @@ struct Atsumaru;
 
 fn build_manga_from_doc(doc: &SearchDocument) -> Manga {
     Manga {
-        key: doc.id.clone(),
-        title: doc.title.clone(),
+        key: doc.id.clone().unwrap_or_default(),
+        title: doc.title.clone().unwrap_or_default(),
         cover: doc.poster.clone().map(|p| if p.starts_with("/") { format!("{}{}", BASE_URL, p) } else { p }),
-        url: Some(format!("{}/manga/{}", BASE_URL, doc.id)),
+        url: Some(format!("{}/manga/{}", BASE_URL, doc.id.clone().unwrap_or_default())),
         status: match doc.status.as_deref() {
             Some("Ongoing") => MangaStatus::Ongoing,
             Some("Completed") => MangaStatus::Completed,
@@ -105,24 +105,44 @@ impl Source for Atsumaru {
         needs_chapters: bool,
     ) -> Result<Manga> {
         let mut updated_manga = manga.clone();
+        let mut scanlator_map = aidoku::alloc::collections::BTreeMap::new();
 
-        if needs_details {
+        if needs_details || needs_chapters {
             let url = format!("{}/manga/page?id={}", API_BASE, manga.key);
             if let Ok(json) = Request::get(&url)?.json_owned::<MangaPageWrapper>() {
+                println!("Details API parsed successfully!");
                 let detail = json.manga_page;
-                updated_manga.title = detail.title;
-                updated_manga.description = detail.synopsis;
-                updated_manga.cover = detail.poster.map(|p| if p.starts_with("/") { format!("{}{}", BASE_URL, p) } else { p });
-                updated_manga.url = Some(format!("{}/manga/{}", BASE_URL, detail.id));
-                updated_manga.status = match detail.status.as_deref() {
-                    Some("Ongoing") => MangaStatus::Ongoing,
-                    Some("Completed") => MangaStatus::Completed,
-                    Some("Hiatus") => MangaStatus::Hiatus,
-                    Some("Dropped") | Some("Cancelled") => MangaStatus::Cancelled,
-                    _ => MangaStatus::Unknown,
-                };
-                updated_manga.authors = detail.authors;
-                updated_manga.tags = detail.genres;
+                
+                if needs_details {
+                    updated_manga.title = detail.title.unwrap_or_default();
+                    updated_manga.description = detail.synopsis;
+                    updated_manga.cover = detail.poster.and_then(|p| p.image).map(|p| if p.starts_with("/") { format!("{}{}", BASE_URL, p) } else { p });
+                    updated_manga.url = Some(format!("{}/manga/{}", BASE_URL, detail.id.clone().unwrap_or_default()));
+                    updated_manga.status = match detail.status.as_deref() {
+                        Some("Ongoing") => MangaStatus::Ongoing,
+                        Some("Completed") => MangaStatus::Completed,
+                        Some("Hiatus") => MangaStatus::Hiatus,
+                        Some("Dropped") | Some("Cancelled") => MangaStatus::Cancelled,
+                        _ => MangaStatus::Unknown,
+                    };
+                    let authors_vec = detail.authors.unwrap_or_default().into_iter().filter_map(|e| e.name).collect::<Vec<_>>();
+                    updated_manga.authors = if authors_vec.is_empty() { None } else { Some(authors_vec) };
+                    
+                    let tags_vec = detail.genres.unwrap_or_default().into_iter().filter_map(|e| e.name).collect::<Vec<_>>();
+                    updated_manga.tags = if tags_vec.is_empty() { None } else { Some(tags_vec) };
+                }
+
+                if let Some(scanlators) = detail.scanlators {
+                    println!("Found {} scanlators from details API", scanlators.len());
+                    for s in scanlators {
+                        println!("Mapping scanlator {} -> {}", s.id, s.name);
+                        scanlator_map.insert(s.id, s.name);
+                    }
+                } else {
+                    println!("No scanlators found in detail.scanlators");
+                }
+            } else {
+                println!("Failed to parse MangaPageWrapper structurally in Rust!");
             }
         }
 
@@ -132,12 +152,18 @@ impl Source for Atsumaru {
                 let mut chapters = Vec::new();
                 for chap in json.chapters {
                     let chapter_url = format!("{}/read/{}?chapterId={}", BASE_URL, manga.key, chap.id);
+                    let scanlator_name = chap.scanlation_manga_id
+                        .as_ref()
+                        .and_then(|id| scanlator_map.get(id))
+                        .map(|s| s.clone());
+                    
                     chapters.push(Chapter {
                         key: chap.id.clone(),
                         title: chap.title.clone(),
                         chapter_number: Some(chap.number),
                         date_uploaded: Some(chap.created_at / 1000), // ms to seconds
                         url: Some(chapter_url),
+                        scanlators: scanlator_name.map(|s| vec![s]),
                         ..Default::default()
                     });
                 }
@@ -248,3 +274,31 @@ impl DeepLinkHandler for Atsumaru {
 }
 
 register_source!(Atsumaru, ListingProvider, Home, DeepLinkHandler);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aidoku_test::aidoku_test;
+
+    #[aidoku_test]
+    fn test_get_manga_update() {
+        let source = Atsumaru;
+        let manga = Manga {
+            key: "WgrNM".to_string(),
+            ..Default::default()
+        };
+        let updated = source.get_manga_update(manga, true, true).expect("Failed to get manga update");
+        
+        let chapters = updated.chapters.expect("No chapters found");
+        assert!(!chapters.is_empty(), "Chapters should not be empty");
+        
+        let mut found_scanlators = false;
+        for (i, chapter) in chapters.iter().enumerate().take(5) {
+            println!("Chapter {} scanlators: {:?}", i, chapter.scanlators);
+            if chapter.scanlators.is_some() {
+                found_scanlators = true;
+            }
+        }
+        assert!(found_scanlators, "At least one chapter should have scanlators mapped from the details API");
+    }
+}

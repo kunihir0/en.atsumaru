@@ -16,9 +16,9 @@ pub struct SearchHit {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchDocument {
-    pub id: String,
-    pub title: String,
-    pub poster: Option<String>,
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub poster: Option<String>, // the Typesense search uses string URL
     pub status: Option<String>,
     pub synopsis: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -56,16 +56,33 @@ pub struct MangaPageWrapper {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MangaPageDetail {
-    pub id: String,
-    pub title: String,
+    pub id: Option<String>,
+    pub title: Option<String>,
     pub english_title: Option<String>,
-    pub poster: Option<String>,
-    pub banner: Option<String>,
+    pub poster: Option<ImageAsset>,     
+    pub banner: Option<ImageAsset>,
     pub status: Option<String>,
     pub synopsis: Option<String>,
-    pub genres: Option<Vec<String>>,
-    pub authors: Option<Vec<String>>,
-    pub chapters: Option<Vec<ChapterItem>>,
+    pub scanlators: Option<Vec<Scanlator>>,
+    pub genres: Option<Vec<Entity>>,
+    pub authors: Option<Vec<Entity>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct ImageAsset {
+    pub image: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Entity {
+    pub id: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Scanlator {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -81,4 +98,6 @@ pub struct ChapterItem {
     pub title: Option<String>,
     pub number: f32,
     pub created_at: i64,
+    #[serde(rename = "scanlationMangaId")]
+    pub scanlation_manga_id: Option<String>,
 }
