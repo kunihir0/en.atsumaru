@@ -17,11 +17,23 @@ const SEARCH_URL: &str = "https://atsu.moe/collections/manga/documents/search";
 
 struct Atsumaru;
 
+fn resolve_image_url(path: String) -> String {
+    if path.starts_with("http") {
+        path
+    } else if path.starts_with("/static/") || path.starts_with("static/") {
+        format!("{}/{}", BASE_URL, path.trim_start_matches('/'))
+    } else if path.starts_with("/") {
+        format!("{}{}", BASE_URL, path)
+    } else {
+        format!("{}/static/{}", BASE_URL, path)
+    }
+}
+
 fn build_manga_from_doc(doc: &SearchDocument) -> Manga {
     Manga {
         key: doc.id.clone().unwrap_or_default(),
         title: doc.title.clone().unwrap_or_default(),
-        cover: doc.poster.clone().map(|p| if p.starts_with("/") { format!("{}{}", BASE_URL, p) } else { p }),
+        cover: doc.poster.clone().map(resolve_image_url),
         url: Some(format!("{}/manga/{}", BASE_URL, doc.id.clone().unwrap_or_default())),
         status: match doc.status.as_deref() {
             Some("Ongoing") => MangaStatus::Ongoing,
@@ -116,7 +128,8 @@ impl Source for Atsumaru {
                 if needs_details {
                     updated_manga.title = detail.title.unwrap_or_default();
                     updated_manga.description = detail.synopsis;
-                    updated_manga.cover = detail.poster.and_then(|p| p.image).map(|p| if p.starts_with("/") { format!("{}{}", BASE_URL, p) } else { p });
+                    updated_manga.cover = detail.poster.and_then(|p| p.image).map(resolve_image_url);
+                    println!("Cover URL is correctly formatted: {}", updated_manga.cover.clone().unwrap_or_default());
                     updated_manga.url = Some(format!("{}/manga/{}", BASE_URL, detail.id.clone().unwrap_or_default()));
                     updated_manga.status = match detail.status.as_deref() {
                         Some("Ongoing") => MangaStatus::Ongoing,
@@ -179,11 +192,7 @@ impl Source for Atsumaru {
         let json = Request::get(&url)?.json_owned::<ChapterPageResponse>()?;
 
         let pages = json.read_chapter.pages.into_iter().map(|p| {
-            let img_url = if p.image.starts_with("/") {
-                format!("{}{}", BASE_URL, p.image)
-            } else {
-                p.image
-            };
+            let img_url = resolve_image_url(p.image);
             Page {
                 content: PageContent::url(img_url),
                 ..Default::default()
@@ -291,6 +300,10 @@ mod tests {
         
         let chapters = updated.chapters.expect("No chapters found");
         assert!(!chapters.is_empty(), "Chapters should not be empty");
+        
+        let cover_url = updated.cover.expect("No cover found for the manga details");
+        assert!(!cover_url.is_empty(), "Cover URL should not be empty");
+        println!("Cover URL is correctly formatted: {}", cover_url);
         
         let mut found_scanlators = false;
         for (i, chapter) in chapters.iter().enumerate().take(5) {
