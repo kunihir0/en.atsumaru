@@ -3,4 +3,3 @@ package.aix
 *.har
 *.html
 examples/
-.cargo

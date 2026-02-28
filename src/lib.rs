@@ -180,6 +180,14 @@ impl Source for Atsumaru {
                         ..Default::default()
                     });
                 }
+                
+                // Sort chapters descending by chapter number to fix hierarchy for multiple scanlators
+                chapters.sort_by(|a, b| {
+                    let a_num = a.chapter_number.unwrap_or(0.0);
+                    let b_num = b.chapter_number.unwrap_or(0.0);
+                    b_num.partial_cmp(&a_num).unwrap_or(core::cmp::Ordering::Equal)
+                });
+                
                 updated_manga.chapters = Some(chapters);
             }
         }
@@ -313,5 +321,22 @@ mod tests {
             }
         }
         assert!(found_scanlators, "At least one chapter should have scanlators mapped from the details API");
+    }
+
+    #[aidoku_test]
+    fn test_chapter_sorting() {
+        let source = Atsumaru;
+        let manga = Manga {
+            key: "TKRmo".to_string(), // Absolute Regression
+            ..Default::default()
+        };
+        let updated = source.get_manga_update(manga, false, true).expect("Failed to get manga chapters");
+        
+        let chapters = updated.chapters.expect("No chapters found");
+        println!("Found {} chapters for TKRmo", chapters.len());
+        
+        for (i, chapter) in chapters.iter().enumerate().take(20) {
+            println!("Index {}: Ch. {:?} - {:?} by {:?}", i, chapter.chapter_number, chapter.title, chapter.scanlators);
+        }
     }
 }
